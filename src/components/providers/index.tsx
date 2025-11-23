@@ -10,6 +10,7 @@ import {
 import ReactQueryProvider from "./components/react-query.provider";
 import { getFormats } from "@/i18n/request";
 import { Toaster } from "@/components/ui/sonner";
+import { Toaster as Toasters } from "sonner";
 
 type ProvidersProps = {
   children: React.ReactNode;
@@ -34,6 +35,7 @@ export default function Providers({ children }: ProvidersProps) {
         >
           {children}
           <Toaster />
+          <Toasters />
         </NextIntlClientProvider>
       </NextAuthProvider>
     </ReactQueryProvider>

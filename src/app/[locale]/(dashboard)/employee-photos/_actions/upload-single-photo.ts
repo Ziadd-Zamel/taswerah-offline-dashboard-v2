@@ -1,5 +1,3 @@
-import { revalidatePath } from "next/cache";
-
 interface UploadResponse {
   success: boolean;
   message?: string;
@@ -11,14 +9,13 @@ export async function uploadSinglePhotoAction(
 ): Promise<UploadResponse> {
   try {
     const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API}/api/temp/upload-photo`,
+      `${process.env.NEXT_PUBLIC_API}/temp/upload-photo`,
       {
         method: "POST",
         body: formData,
       }
     );
-    revalidatePath("/");
-    revalidatePath("/employee-photos");
+
     if (response.ok) {
       return {
         success: true,

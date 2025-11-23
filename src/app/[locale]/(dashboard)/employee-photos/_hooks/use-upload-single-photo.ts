@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useRef, useCallback } from "react";
 import { uploadSinglePhotoAction } from "../_actions/upload-single-photo";
 
 interface UploadSinglePhotoData {
@@ -12,37 +12,92 @@ interface UseUploadSinglePhotoOptions {
   onError?: (error: string) => void;
 }
 
+interface UploadQueueItem {
+  data: UploadSinglePhotoData;
+  onSuccess: () => void;
+  onError: (error: Error) => void;
+}
+
 export const useUploadSinglePhoto = ({
   onSuccess,
   onError,
 }: UseUploadSinglePhotoOptions = {}) => {
-  return useMutation({
-    mutationFn: async (data: UploadSinglePhotoData) => {
-      // Create FormData on the client side
-      const formData = new FormData();
+  const queueRef = useRef<UploadQueueItem[]>([]);
+  const isProcessingRef = useRef(false);
 
-      // Append the photo
-      formData.append("photo", data.photo);
+  const processQueue = useCallback(async () => {
+    if (isProcessingRef.current || queueRef.current.length === 0) {
+      return;
+    }
 
-      formData.append("barcode_prefix", data.barcodePrefix);
+    isProcessingRef.current = true;
 
-      data.employeeIds.forEach((employeeId) => {
-        formData.append("employee_ids[]", employeeId.toString());
-      });
+    while (queueRef.current.length > 0) {
+      const item = queueRef.current.shift();
+      if (!item) break;
 
-      const result = await uploadSinglePhotoAction(formData);
+      try {
+        // Create FormData
+        const formData = new FormData();
+        formData.append("photo", item.data.photo);
+        formData.append("barcode_prefix", item.data.barcodePrefix);
 
-      if (!result.success) {
-        throw new Error(result.error || "Upload failed");
+        item.data.employeeIds.forEach((employeeId) => {
+          formData.append("employee_id", employeeId.toString());
+        });
+
+        const result = await uploadSinglePhotoAction(formData);
+
+        if (!result.success) {
+          throw new Error(result.error || "Upload failed");
+        }
+
+        item.onSuccess();
+      } catch (error) {
+        item.onError(error as Error);
       }
 
-      return result;
+      // Small delay between uploads
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    isProcessingRef.current = false;
+  }, []);
+
+  const mutate = useCallback(
+    (
+      data: UploadSinglePhotoData,
+      callbacks?: {
+        onSuccess?: () => void;
+        onError?: (error: Error) => void;
+      }
+    ) => {
+      const queueItem: UploadQueueItem = {
+        data,
+        onSuccess: () => {
+          callbacks?.onSuccess?.();
+          onSuccess?.();
+        },
+        onError: (error: Error) => {
+          callbacks?.onError?.(error);
+          onError?.(error.message);
+        },
+      };
+
+      queueRef.current.push(queueItem);
+      processQueue();
     },
-    onSuccess: () => {
-      onSuccess?.();
-    },
-    onError: (error: Error) => {
-      onError?.(error.message);
-    },
-  });
+    [processQueue, onSuccess, onError]
+  );
+
+  const clearQueue = useCallback(() => {
+    queueRef.current = [];
+    isProcessingRef.current = false;
+  }, []);
+
+  return {
+    mutate,
+    clearQueue,
+    isLoading: isProcessingRef.current,
+  };
 };

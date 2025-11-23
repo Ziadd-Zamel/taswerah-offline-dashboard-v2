@@ -65,6 +65,7 @@ export default function ImageUploader({
       onError?.(error);
     },
   });
+
   const detectTopLevelFolderName = useCallback(
     (files: File[]): string | null => {
       for (const file of files) {
@@ -157,66 +158,74 @@ export default function ImageUploader({
         // Upload each new file if autoUpload is enabled
         if (autoUpload && employeeIds.length > 0 && barcodePrefix) {
           newFiles.forEach((newFile, batchIndex) => {
-            const globalIndex = selectedFiles.length + batchIndex;
+            const globalIndex = selectedFiles.length + startIndex + batchIndex;
 
-            // Update status to uploading immediately
-            setTimeout(() => {
-              const currentFiles = [...filesRef.current];
-              if (currentFiles[globalIndex]) {
-                currentFiles[globalIndex] = {
-                  ...currentFiles[globalIndex],
-                  uploadStatus: "uploading",
-                };
-                onFilesChange(currentFiles);
-              }
+            // Queue the upload (will be processed sequentially)
+            uploadMutation.mutate(
+              {
+                photo: newFile.file,
+                barcodePrefix: barcodePrefix,
+                employeeIds: employeeIds,
+              },
+              {
+                onSuccess: () => {
+                  // Update status to success
+                  const successFiles = [...filesRef.current];
+                  if (successFiles[globalIndex]) {
+                    successFiles[globalIndex] = {
+                      ...successFiles[globalIndex],
+                      uploadStatus: "success",
+                      uploadError: undefined,
+                    };
+                    onFilesChange(successFiles);
+                  }
 
-              // Upload with a small delay to avoid overwhelming the server
-              uploadMutation.mutate(
-                {
-                  photo: newFile.file,
-                  barcodePrefix: barcodePrefix,
-                  employeeIds: employeeIds,
+                  // Update progress
+                  setUploadProgress((prev) => {
+                    if (!prev) return null;
+                    return {
+                      ...prev,
+                      uploaded: prev.uploaded + 1,
+                    };
+                  });
                 },
-                {
-                  onSuccess: () => {
-                    const successFiles = [...filesRef.current];
-                    if (successFiles[globalIndex]) {
-                      successFiles[globalIndex] = {
-                        ...successFiles[globalIndex],
-                        uploadStatus: "success",
-                        uploadError: undefined,
-                      };
-                      onFilesChange(successFiles);
-                    }
-                    setUploadProgress((prev) => {
-                      if (!prev) return null;
-                      return {
-                        ...prev,
-                        uploaded: prev.uploaded + 1,
-                      };
-                    });
-                  },
-                  onError: (error: Error) => {
-                    const errorFiles = [...filesRef.current];
-                    if (errorFiles[globalIndex]) {
-                      errorFiles[globalIndex] = {
-                        ...errorFiles[globalIndex],
-                        uploadStatus: "error",
-                        uploadError: error.message,
-                      };
-                      onFilesChange(errorFiles);
-                    }
-                    setUploadProgress((prev) => {
-                      if (!prev) return null;
-                      return {
-                        ...prev,
-                        failed: prev.failed + 1,
-                      };
-                    });
-                  },
+                onError: (error: Error) => {
+                  // Update status to error
+                  const errorFiles = [...filesRef.current];
+                  if (errorFiles[globalIndex]) {
+                    errorFiles[globalIndex] = {
+                      ...errorFiles[globalIndex],
+                      uploadStatus: "error",
+                      uploadError: error.message,
+                    };
+                    onFilesChange(errorFiles);
+                  }
+
+                  // Update progress
+                  setUploadProgress((prev) => {
+                    if (!prev) return null;
+                    return {
+                      ...prev,
+                      failed: prev.failed + 1,
+                    };
+                  });
+                },
+              }
+            );
+
+            // Immediately update status to uploading for first item only
+            if (globalIndex === selectedFiles.length) {
+              setTimeout(() => {
+                const uploadingFiles = [...filesRef.current];
+                if (uploadingFiles[globalIndex]) {
+                  uploadingFiles[globalIndex] = {
+                    ...uploadingFiles[globalIndex],
+                    uploadStatus: "uploading",
+                  };
+                  onFilesChange(uploadingFiles);
                 }
-              );
-            }, batchIndex * 100);
+              }, 50);
+            }
           });
         }
 
@@ -246,6 +255,33 @@ export default function ImageUploader({
     ]
   );
 
+  // Watch for status changes to update "uploading" status
+  useEffect(() => {
+    const uploadingIndex = selectedFiles.findIndex(
+      (f) => f.uploadStatus === "uploading"
+    );
+    const nextIdleIndex = selectedFiles.findIndex(
+      (f) => f.uploadStatus === "idle"
+    );
+
+    // If current uploading item finished, mark next idle as uploading
+    if (uploadingIndex === -1 && nextIdleIndex !== -1) {
+      setTimeout(() => {
+        const updatedFiles = [...filesRef.current];
+        if (
+          updatedFiles[nextIdleIndex] &&
+          updatedFiles[nextIdleIndex].uploadStatus === "idle"
+        ) {
+          updatedFiles[nextIdleIndex] = {
+            ...updatedFiles[nextIdleIndex],
+            uploadStatus: "uploading",
+          };
+          onFilesChange(updatedFiles);
+        }
+      }, 100);
+    }
+  }, [selectedFiles, onFilesChange]);
+
   const handleFileSelect = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(event.target.files || []);
@@ -266,12 +302,18 @@ export default function ImageUploader({
   );
 
   const clearAllFiles = useCallback(() => {
+    // Clear upload queue
+    uploadMutation.clearQueue();
+
+    // Revoke all preview URLs
     selectedFiles.forEach(({ preview }) => URL.revokeObjectURL(preview));
+
+    // Reset all state
     onFilesChange([]);
     onFolderNameChange?.(null);
     setProcessingProgress(null);
     setUploadProgress(null);
-  }, [selectedFiles, onFilesChange, onFolderNameChange]);
+  }, [selectedFiles, onFilesChange, onFolderNameChange, uploadMutation]);
 
   // Memoize grid to prevent unnecessary re-renders
   const imageGrid = useMemo(() => {

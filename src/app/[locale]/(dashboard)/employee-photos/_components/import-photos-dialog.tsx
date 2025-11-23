@@ -26,6 +26,7 @@ import {
 import MultipleSelector, { Option } from "@/components/ui/multiple-selector";
 import ImageUploader from "./file-upload-area";
 import { useUploadPhotos } from "../_hooks/use-upload-photos";
+import { useApprovePhotos } from "../_hooks/use-approve-photos";
 
 const importPhotosSchema = z.object({
   barcodePrefix: z
@@ -61,6 +62,19 @@ export default function ImportPhotosDialog({
   >([]);
   const t = useTranslations();
 
+  const resetAll = () => {
+    setSelectedFiles([]);
+    setSelectedEmployeeOptions([]);
+    form.reset({
+      barcodePrefix: "",
+      photos: [],
+      selectedEmployees: [],
+    });
+
+    onClose();
+  };
+
+  const { mutate } = useApprovePhotos({ onClose: resetAll });
   // Convert employees to options format
   const employeeOptions: Option[] = employees.map((employee) => ({
     label: employee.name,
@@ -141,11 +155,12 @@ export default function ImportPhotosDialog({
   };
 
   const onSubmit = async (data: ImportPhotosFormData) => {
-    uploadPhotosMutation.mutate({
-      photos: data.photos,
-      barcodePrefix: data.barcodePrefix,
-      employeeIds: data.selectedEmployees,
-    });
+    // uploadPhotosMutation.mutate({
+    //   photos: data.photos,
+    //   barcodePrefix: data.barcodePrefix,
+    //   employeeIds: data.selectedEmployees,
+    // });
+    mutate();
   };
 
   const handleDialogClose = (force = false) => {
@@ -219,7 +234,9 @@ export default function ImportPhotosDialog({
                       onFilesChange={handleFilesChange}
                       onError={handleFileError}
                       onFolderNameChange={handleFolderNameChange}
-                      disabled={isUploading}
+                      disabled={
+                        isUploading || selectedEmployeeOptions.length === 0
+                      }
                       employeeIds={form.watch("selectedEmployees") || []}
                       autoUpload={true}
                     />
